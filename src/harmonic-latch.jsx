@@ -11,9 +11,7 @@ const V = {
   bg: "#0d1b2a", bgDeep: "#091525", bgPanel: "#0f2035",
   border: "rgba(240,237,232,0.12)", borderHi: "rgba(240,237,232,0.35)",
   text: "#F0EDE8", textDim: "rgba(240,237,232,0.5)", textFaint: "rgba(240,237,232,0.2)",
-  gold: "#d4a843", goldLight: "#e8c060",
-  red: "#ff2255", lime: "#c8f020", violet: "#b44fff", blue: "#00cfff", pink: "#ff44aa",
-  panel: "#0f2035",
+  gold: "#d4a843", red: "#ff2255", lime: "#c8f020", violet: "#b44fff",
 };
 const SANS    = "'IBM Plex Sans', sans-serif";
 const MONO    = "'IBM Plex Mono', monospace";
@@ -47,16 +45,14 @@ const LOCATIONS = {
   brazil:{ label:"Brazil", flag:"🇧🇷", color:"#d4a843" },
 };
 function makeLocData(base, scale=1, offset=0, noise=0.05) {
-  return base.map((v,i) => {
-    const n = (Math.sin(i*7.3+offset)*2-1)*noise*Math.abs(v||1);
-    return +(v*scale+offset+n).toFixed(2);
-  });
+  return base.map((v,i) => +(v*scale + offset + (Math.sin(i*7.3+offset)*2-1)*noise*Math.abs(v||1)).toFixed(2));
 }
 
 // ── TIME ──────────────────────────────────────────────────────────────────────
 const N = 72;
-const MONTH_LABELS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-const ALL_TIME_LABELS = [2019,2020,2021,2022,2023,2024].flatMap(y => MONTH_LABELS.map(m => `${m} ${y}`));
+const ALL_TIME_LABELS = [2019,2020,2021,2022,2023,2024].flatMap(y =>
+  ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map(m => `${m} ${y}`)
+);
 const ERAS = [
   {start:0,  end:11, label:"Pre-COVID",  color:"rgba(180,79,255,0.18)"},
   {start:12, end:23, label:"Pandemic",   color:"rgba(255,34,85,0.18)"},
@@ -114,235 +110,189 @@ const SIGNAL_DEFS = [
 function getSignalData(sigId, locId) {
   const def = SIGNAL_DEFS.find(d => d.id === sigId);
   if (!def) return [];
-  const base = BASE[def.baseKey] || [];
-  const ls = LOC_SCALES[locId] || LOC_SCALES.global;
-  return makeLocData(base, ls.scale, ls.offset, ls.noise);
+  return makeLocData(BASE[def.baseKey] || [], (LOC_SCALES[locId] || LOC_SCALES.global).scale, (LOC_SCALES[locId] || LOC_SCALES.global).offset, (LOC_SCALES[locId] || LOC_SCALES.global).noise);
 }
 
 // ── LINE CHART ────────────────────────────────────────────────────────────────
-function LineChart({activeIds, locations, hoveredId, onHover, onPointSelect, pointIdx, width, height, timeRange, perspective, customSignals}) {
+const CHART_PAD = { L:36, R:14, T:28, B:34 };
+
+function LineChart({activeIds, locations, customSignals, hoveredId, onHover, onPointSelect, pointIdx, width, height, timeRange, perspective}) {
   const canvasRef = useRef(null);
   const dpr = window.devicePixelRatio || 1;
-
-  const PAD = { L: 36, R: 14, T: 28, B: 34 };
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
-    canvas.width  = width  * dpr;
-    canvas.height = height * dpr;
+    canvas.width = width * dpr; canvas.height = height * dpr;
     ctx.scale(dpr, dpr);
 
-    const W = width, H = height;
-    const { L, R, T, B } = PAD;
-    const plotW = W - L - R;
-    const plotH = H - T - B;
-    const [t0, t1] = timeRange;
-    const sliceN = t1 - t0;
+    const { L, R, T, B } = CHART_PAD;
+    const plotW = width - L - R, plotH = height - T - B;
+    const [t0, t1] = timeRange, sliceN = t1 - t0;
     if (sliceN < 2) return;
 
     const activeLocs   = locations.filter(l => l.active);
     const primaryLocId = (activeLocs[0] || {id:"global"}).id;
 
-    // Compute lines based on perspective
     const lines = perspective === "overlay"
       ? activeLocs.map(loc => {
-          const sigId = activeIds[0];
-          if (!sigId) return null;
-          return { id: loc.id, color: LOCATIONS[loc.id].color, data: getSignalData(sigId, loc.id).slice(t0, t1) };
+          const sigId = activeIds[0]; if (!sigId) return null;
+          return { id:loc.id, color:LOCATIONS[loc.id].color, data:getSignalData(sigId, loc.id).slice(t0, t1) };
         }).filter(Boolean)
       : activeIds.map((sigId, i) => {
           const custom = customSignals?.find(c => c.id === sigId);
-          const data   = custom ? custom.data.slice(0, sliceN) : getSignalData(sigId, primaryLocId).slice(t0, t1);
-          return { id: sigId, color: PALETTE[i % PALETTE.length], data };
+          return { id:sigId, color:PALETTE[i % PALETTE.length], data: custom ? custom.data.slice(0, sliceN) : getSignalData(sigId, primaryLocId).slice(t0, t1) };
         });
 
-    // Background
-    ctx.fillStyle = V.bgDeep;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = V.bgDeep; ctx.fillRect(0, 0, width, height);
 
-    // Era bands
     ERAS.forEach(era => {
       const eS = Math.max(era.start, t0), eE = Math.min(era.end + 1, t1);
       if (eS >= eE) return;
-      const x0 = L + (eS - t0) / sliceN * plotW;
-      const x1 = L + (eE - t0) / sliceN * plotW;
-      ctx.fillStyle = era.color;
-      ctx.fillRect(x0, T, x1 - x0, plotH);
+      const x0 = L + (eS - t0) / sliceN * plotW, x1 = L + (eE - t0) / sliceN * plotW;
+      ctx.fillStyle = era.color; ctx.fillRect(x0, T, x1 - x0, plotH);
       const bw = x1 - x0;
       if (bw > 28) {
         ctx.fillStyle = "rgba(240,237,232,0.32)";
-        ctx.font = `${Math.min(9, bw / 8)}px 'IBM Plex Sans',sans-serif`;
+        ctx.font = `${Math.min(9, bw/8)}px 'IBM Plex Sans',sans-serif`;
         ctx.textAlign = "center"; ctx.textBaseline = "top";
-        ctx.fillText(era.label, (x0 + x1) / 2, T + 5);
+        ctx.fillText(era.label, (x0+x1)/2, T+5);
       }
     });
 
-    // Grid lines
     for (let i = 0; i <= 4; i++) {
-      const y = T + (i / 4) * plotH;
-      ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + plotW, y);
-      ctx.strokeStyle = i === 4 ? "rgba(240,237,232,0.2)" : "rgba(240,237,232,0.06)";
-      ctx.lineWidth   = i === 4 ? 1 : 0.5;
-      ctx.stroke();
+      const y = T + (i/4)*plotH;
+      ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L+plotW, y);
+      ctx.strokeStyle = i===4 ? "rgba(240,237,232,0.2)" : "rgba(240,237,232,0.06)";
+      ctx.lineWidth   = i===4 ? 1 : 0.5; ctx.stroke();
     }
-
-    // Borders
-    ctx.beginPath(); ctx.moveTo(L, T); ctx.lineTo(L, T + plotH);
+    ctx.beginPath(); ctx.moveTo(L, T); ctx.lineTo(L, T+plotH);
     ctx.strokeStyle = "rgba(240,237,232,0.2)"; ctx.lineWidth = 1; ctx.stroke();
 
-    // Y labels
     ctx.fillStyle = V.textFaint; ctx.font = `8px 'IBM Plex Mono',monospace`;
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
-    ctx.fillText("HI", L - 5, T);
-    ctx.fillText("LO", L - 5, T + plotH);
+    ctx.fillText("HI", L-5, T); ctx.fillText("LO", L-5, T+plotH);
 
-    // X labels
     const numL = Math.min(6, sliceN);
     ctx.fillStyle = V.gold; ctx.font = `bold 8px 'IBM Plex Mono',monospace`;
     ctx.textAlign = "center"; ctx.textBaseline = "top";
     for (let i = 0; i <= numL; i++) {
-      const idx    = Math.round(i / numL * (sliceN - 1));
-      const absIdx = t0 + idx;
+      const idx = Math.round(i/numL*(sliceN-1)), absIdx = t0+idx;
       if (absIdx >= N) continue;
-      ctx.fillText(ALL_TIME_LABELS[absIdx].slice(-4), L + idx / (sliceN - 1) * plotW, T + plotH + 6);
+      ctx.fillText(ALL_TIME_LABELS[absIdx].slice(-4), L + idx/(sliceN-1)*plotW, T+plotH+6);
     }
 
-    // Signal lines
     lines.forEach(({ id, color, data }) => {
       if (!data || data.length < 2) return;
-      const isHov  = hoveredId === id;
-      const dimmed = hoveredId && !isHov;
-      const norm   = normalize(data);
-      const xOf    = i => L + (i / (data.length - 1)) * plotW;
-      const yOf    = v => T + (1 - v) * plotH;
+      const isHov = hoveredId === id, dimmed = hoveredId && !isHov;
+      const norm  = normalize(data);
+      const xOf   = i => L + (i/(data.length-1))*plotW;
+      const yOf   = v => T + (1-v)*plotH;
 
-      // Area fill
       ctx.beginPath();
-      norm.forEach((v, i) => i === 0 ? ctx.moveTo(xOf(i), yOf(v)) : ctx.lineTo(xOf(i), yOf(v)));
-      ctx.lineTo(xOf(data.length - 1), T + plotH);
-      ctx.lineTo(L, T + plotH);
-      ctx.closePath();
-      ctx.fillStyle = hexToRgba(color, dimmed ? 0.01 : isHov ? 0.14 : 0.05);
-      ctx.fill();
+      norm.forEach((v,i) => i===0 ? ctx.moveTo(xOf(i),yOf(v)) : ctx.lineTo(xOf(i),yOf(v)));
+      ctx.lineTo(xOf(data.length-1), T+plotH); ctx.lineTo(L, T+plotH); ctx.closePath();
+      ctx.fillStyle = hexToRgba(color, dimmed ? 0.01 : isHov ? 0.14 : 0.05); ctx.fill();
 
-      // Line
       ctx.beginPath();
-      norm.forEach((v, i) => i === 0 ? ctx.moveTo(xOf(i), yOf(v)) : ctx.lineTo(xOf(i), yOf(v)));
+      norm.forEach((v,i) => i===0 ? ctx.moveTo(xOf(i),yOf(v)) : ctx.lineTo(xOf(i),yOf(v)));
       ctx.strokeStyle = hexToRgba(color, dimmed ? 0.15 : isHov ? 1 : 0.8);
-      ctx.lineWidth   = isHov ? 2.5 : 1.5;
-      ctx.stroke();
+      ctx.lineWidth   = isHov ? 2.5 : 1.5; ctx.stroke();
 
-      // Point dot at crosshair
       if (pointIdx !== null) {
-        const pi = Math.min(pointIdx, data.length - 1);
-        ctx.beginPath();
-        ctx.arc(xOf(pi), yOf(norm[pi]), isHov ? 5 : 3, 0, Math.PI * 2);
-        ctx.fillStyle   = color;
-        ctx.globalAlpha = dimmed ? 0.2 : 1;
-        ctx.fill();
-        ctx.globalAlpha = 1;
+        const pi = Math.min(pointIdx, data.length-1);
+        ctx.beginPath(); ctx.arc(xOf(pi), yOf(norm[pi]), isHov ? 5 : 3, 0, Math.PI*2);
+        ctx.fillStyle = color; ctx.globalAlpha = dimmed ? 0.2 : 1; ctx.fill(); ctx.globalAlpha = 1;
       }
     });
 
-    // Vertical crosshair
     if (pointIdx !== null) {
-      const x = L + (Math.min(pointIdx, sliceN - 1) / (sliceN - 1)) * plotW;
-      ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, T + plotH);
+      const x = L + (Math.min(pointIdx, sliceN-1)/(sliceN-1))*plotW;
+      ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, T+plotH);
       ctx.strokeStyle = "rgba(240,237,232,0.28)"; ctx.lineWidth = 1;
-      ctx.setLineDash([2, 3]); ctx.stroke(); ctx.setLineDash([]);
+      ctx.setLineDash([2,3]); ctx.stroke(); ctx.setLineDash([]);
     }
-  }, [activeIds, locations, hoveredId, pointIdx, width, height, timeRange, perspective, customSignals, dpr]);
+  }, [activeIds, locations, customSignals, hoveredId, pointIdx, width, height, timeRange, perspective, dpr]);
 
   const getFromEvent = useCallback((e) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { idx: null, id: null };
-    const rect    = canvas.getBoundingClientRect();
+    const canvas = canvasRef.current; if (!canvas) return {idx:null,id:null};
+    const rect = canvas.getBoundingClientRect();
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    const mx      = (clientX - rect.left) * (width  / rect.width);
-    const my      = (clientY - rect.top)  * (height / rect.height);
-
-    const { L, R, T, B } = PAD;
-    const plotW  = width  - L - R;
-    const plotH  = height - T - B;
-    const [t0, t1] = timeRange;
-    const sliceN   = t1 - t0;
-    if (sliceN < 2 || mx < L || mx > L + plotW || my < T || my > T + plotH) return { idx: null, id: null };
-
-    const idx          = Math.round((mx - L) / plotW * (sliceN - 1));
+    const mx = (clientX - rect.left) * (width/rect.width);
+    const my = (clientY - rect.top)  * (height/rect.height);
+    const { L, R, T, B } = CHART_PAD;
+    const plotW = width-L-R, plotH = height-T-B;
+    const [t0,t1] = timeRange, sliceN = t1-t0;
+    if (sliceN < 2 || mx < L || mx > L+plotW || my < T || my > T+plotH) return {idx:null,id:null};
+    const idx = Math.round((mx-L)/plotW*(sliceN-1));
     const activeLocs   = locations.filter(l => l.active);
     const primaryLocId = (activeLocs[0] || {id:"global"}).id;
-
-    const lineItems = perspective === "overlay"
-      ? activeLocs.map(loc => ({ id: loc.id, data: getSignalData(activeIds[0], loc.id).slice(t0, t1) }))
+    const items = perspective === "overlay"
+      ? activeLocs.map(loc => ({id:loc.id, data:getSignalData(activeIds[0], loc.id).slice(t0,t1)}))
       : activeIds.map(sigId => {
           const custom = customSignals?.find(c => c.id === sigId);
-          return { id: sigId, data: custom ? custom.data.slice(0, sliceN) : getSignalData(sigId, primaryLocId).slice(t0, t1) };
+          return {id:sigId, data: custom ? custom.data.slice(0,sliceN) : getSignalData(sigId, primaryLocId).slice(t0,t1)};
         });
-
     let closest = null, closestDist = 999;
-    lineItems.forEach(({ id, data }) => {
-      if (!data || !data.length) return;
-      const norm = normalize(data);
-      const v    = norm[Math.min(idx, norm.length - 1)];
-      const y    = T + (1 - v) * plotH;
-      if (Math.abs(my - y) < closestDist) { closestDist = Math.abs(my - y); closest = id; }
+    items.forEach(({id, data}) => {
+      if (!data?.length) return;
+      const v = normalize(data)[Math.min(idx, data.length-1)];
+      const y = T + (1-v)*plotH;
+      if (Math.abs(my-y) < closestDist) { closestDist = Math.abs(my-y); closest = id; }
     });
+    return {idx, id: closestDist < 28 ? closest : null};
+  }, [activeIds, locations, customSignals, timeRange, perspective, width, height]);
 
-    return { idx, id: closestDist < 28 ? closest : null };
-  }, [activeIds, locations, timeRange, perspective, customSignals, width, height]);
-
-  const handleMove  = useCallback((e) => { const { idx, id } = getFromEvent(e); onPointSelect(idx); onHover(id); }, [getFromEvent, onPointSelect, onHover]);
+  const handleMove  = useCallback(e => { const {idx,id} = getFromEvent(e); onPointSelect(idx); onHover(id); }, [getFromEvent, onPointSelect, onHover]);
   const handleLeave = useCallback(() => { onHover(null); onPointSelect(null); }, [onHover, onPointSelect]);
 
   return (
     <canvas ref={canvasRef}
-      style={{ width, height, display: "block", cursor: "crosshair", touchAction: "none", maxWidth: "100%" }}
+      style={{width, height, display:"block", cursor:"crosshair", touchAction:"none", maxWidth:"100%"}}
       onMouseMove={handleMove} onMouseLeave={handleLeave}
-      onTouchMove={e => { e.preventDefault(); handleMove(e); }} onTouchEnd={handleLeave}
+      onTouchMove={e => {e.preventDefault(); handleMove(e);}} onTouchEnd={handleLeave}
     />
   );
 }
 
 // ── ADD MODAL ─────────────────────────────────────────────────────────────────
 function AddModal({onAdd, onClose, usedColors}) {
-  const [label, setLabel] = useState("");
-  const [unit,  setUnit]  = useState("");
-  const [cat,   setCat]   = useState("Custom");
-  const [raw,   setRaw]   = useState("");
-  const [color, setColor] = useState(PALETTE.find(c => !usedColors.includes(c)) || PALETTE[0]);
-  const [err,   setErr]   = useState("");
+  const [label,setLabel] = useState(""); const [unit,setUnit]   = useState("");
+  const [cat,setCat]     = useState("Custom"); const [raw,setRaw] = useState("");
+  const [color,setColor] = useState(PALETTE.find(c => !usedColors.includes(c)) || PALETTE[0]);
+  const [err,setErr]     = useState("");
   const nums = raw.split(/[\s,;\n\t]+/).map(Number).filter(v => !isNaN(v) && String(v).trim() !== "");
   const submit = () => {
     if (!label.trim()) { setErr("Name required"); return; }
     if (nums.length < 3) { setErr("Need 3+ data points"); return; }
-    onAdd({ id:`custom_${Date.now()}`, label:label.trim(), unit:unit.trim(), cat:cat||"Custom", baseKey:null, color, data:nums, custom:true });
+    onAdd({id:`custom_${Date.now()}`, label:label.trim(), unit:unit.trim(), cat:cat||"Custom", baseKey:null, color, data:nums, custom:true});
     onClose();
   };
-  const inputStyle = { width:"100%", background:"rgba(255,255,255,0.05)", border:`1px solid ${V.border}`, color:V.text, padding:"10px 12px", fontFamily:MONO, fontSize:13, boxSizing:"border-box", outline:"none" };
-  const lblStyle   = { fontSize:10, letterSpacing:"0.15em", color:V.textDim, fontFamily:SANS, marginBottom:5, textTransform:"uppercase", fontWeight:600 };
+  const inp = {width:"100%", background:"rgba(255,255,255,0.05)", border:`1px solid ${V.border}`, color:V.text, padding:"10px 12px", fontFamily:MONO, fontSize:13, boxSizing:"border-box", outline:"none"};
+  const lbl = {fontSize:10, letterSpacing:"0.15em", color:V.textDim, fontFamily:SANS, marginBottom:5, textTransform:"uppercase", fontWeight:600};
   return (
     <div style={{position:"fixed",inset:0,zIndex:600,background:"rgba(9,21,37,0.95)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-      <div style={{width:"100%",maxWidth:420,background:V.bgPanel,border:`1px solid ${V.borderHi}`,padding:24}}>
+      <div style={{width:"100%",maxWidth:420,background:"#0f2035",border:`1px solid ${V.borderHi}`,padding:24}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
           <div style={{fontFamily:SANS,fontSize:13,letterSpacing:"0.15em",color:V.gold,fontWeight:700,textTransform:"uppercase"}}>Add Signal</div>
           <button onClick={onClose} style={{background:"none",border:"none",color:V.textDim,cursor:"pointer",fontSize:22,lineHeight:1}}>×</button>
         </div>
-        {[["Signal Name *",label,setLabel,"e.g. My Sales"],["Unit",unit,setUnit,"%, $, pts"],["Category",cat,setCat,"Custom / Economy / ..."]].map(([lbl,val,set,ph]) => (
-          <div key={lbl} style={{marginBottom:12}}>
-            <div style={lblStyle}>{lbl}</div>
-            <input value={val} onChange={e=>set(e.target.value)} placeholder={ph} style={inputStyle}/>
+        {[["Signal Name *",label,setLabel,"e.g. My Sales"],["Unit",unit,setUnit,"%, $, pts"],["Category",cat,setCat,"Custom / Economy / ..."]].map(([l,v,s,p]) => (
+          <div key={l} style={{marginBottom:12}}>
+            <div style={lbl}>{l}</div>
+            <input value={v} onChange={e=>s(e.target.value)} placeholder={p} style={inp}/>
           </div>
         ))}
         <div style={{marginBottom:12}}>
-          <div style={lblStyle}>Data Points * — paste any numbers</div>
-          <textarea value={raw} onChange={e=>setRaw(e.target.value)} rows={4} placeholder={"12.5, 13.1, 11.8...\nor paste from spreadsheet"} style={{...inputStyle,resize:"vertical"}}/>
+          <div style={lbl}>Data Points * — paste any numbers</div>
+          <textarea value={raw} onChange={e=>setRaw(e.target.value)} rows={4}
+            placeholder={"12.5, 13.1, 11.8...\nor paste from spreadsheet"} style={{...inp,resize:"vertical"}}/>
           <div style={{fontSize:11,color:nums.length>=3?V.lime:V.red,fontFamily:MONO,marginTop:4}}>{nums.length} points detected</div>
         </div>
         <div style={{marginBottom:16}}>
-          <div style={lblStyle}>Color</div>
+          <div style={lbl}>Color</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
             {PALETTE.map(c => <div key={c} onClick={()=>setColor(c)} style={{width:22,height:22,background:c,cursor:"pointer",border:`2px solid ${color===c?"white":"transparent"}`,outline:color===c?`2px solid ${c}`:"none",outlineOffset:2}}/>)}
           </div>
@@ -357,61 +307,54 @@ function AddModal({onAdd, onClose, usedColors}) {
 }
 
 // ── READ PANEL ────────────────────────────────────────────────────────────────
-function ReadPanel({activeIds, locations, timeRange, perspective, customSignals, isDesktop}) {
-  const [reading, setReading] = useState("");
-  const [echo,    setEcho]    = useState("");
-  const [loading, setLoading] = useState(false);
-  const [status,  setStatus]  = useState("idle");
+function ReadPanel({activeIds, locations, timeRange, customSignals}) {
+  const [reading,setReading] = useState(""); const [echo,setEcho]   = useState("");
+  const [loading,setLoading] = useState(false); const [status,setStatus] = useState("idle");
 
   const analyze = async () => {
     if (activeIds.length < 2) { setStatus("need2"); return; }
     setLoading(true); setStatus("loading"); setReading(""); setEcho("");
-    const [t0, t1]   = timeRange;
+    const [t0,t1]   = timeRange;
     const activeLocs = locations.filter(l => l.active).map(l => l.id);
     const locId      = activeLocs[0] || "global";
-    const summary    = activeIds.slice(0, 8).map(id => {
+    const summary    = activeIds.slice(0,8).map(id => {
       const def    = SIGNAL_DEFS.find(d => d.id === id);
       const custom = customSignals.find(c => c.id === id);
-      const d      = custom ? custom.data.slice(0, t1-t0) : getSignalData(id, locId).slice(t0, t1);
+      const d      = custom ? custom.data.slice(0,t1-t0) : getSignalData(id, locId).slice(t0,t1);
       if (!d.length) return "";
       const trend = d[d.length-1] - d[0];
-      return `${def?.label||custom?.label||id} (${def?.cat||custom?.cat||"Custom"}, ${LOCATIONS[locId]?.label||locId}): range ${Math.min(...d).toFixed(1)}–${Math.max(...d).toFixed(1)}, trend ${trend>0?"+":""}${trend.toFixed(1)}`;
+      return `${def?.label||custom?.label||id} (${def?.cat||"Custom"}, ${LOCATIONS[locId]?.label||locId}): range ${Math.min(...d).toFixed(1)}–${Math.max(...d).toFixed(1)}, trend ${trend>0?"+":""}${trend.toFixed(1)}`;
     }).filter(Boolean).join("\n");
     const pairs = [];
     for (let i = 0; i < activeIds.length; i++) for (let j = i+1; j < activeIds.length; j++) {
-      const da = getSignalData(activeIds[i], locId).slice(t0, t1);
-      const db = getSignalData(activeIds[j], locId).slice(t0, t1);
-      pairs.push({ a:activeIds[i], b:activeIds[j], r:pearson(da, db) });
+      const da = getSignalData(activeIds[i], locId).slice(t0,t1), db = getSignalData(activeIds[j], locId).slice(t0,t1);
+      pairs.push({a:activeIds[i], b:activeIds[j], r:pearson(da,db)});
     }
-    pairs.sort((a, b) => Math.abs(b.r) - Math.abs(a.r));
-    const pairStr  = pairs.slice(0, 3).map(p => `${SIGNAL_DEFS.find(d=>d.id===p.a)?.label||p.a} vs ${SIGNAL_DEFS.find(d=>d.id===p.b)?.label||p.b}: r=${p.r.toFixed(2)}`).join("; ");
-    const period   = `${ALL_TIME_LABELS[t0]} to ${ALL_TIME_LABELS[Math.min(t1-1, N-1)]}`;
-    const locLabel = activeLocs.map(l => LOCATIONS[l]?.label).join(", ");
-    const prompt   = `Analyzing world signals for ${locLabel}, ${period}.\n\nSignals:\n${summary}\n\nTop relationships: ${pairStr}\n\nRespond ONLY in this exact format:\n\nREADING: [3 sentences. Specific, poetic. What story do these signals tell together? What tension or harmony?]\n\nECHO: [One specific historical period with similar pattern. One sentence on the parallel. One sentence on key difference.]`;
+    pairs.sort((a,b) => Math.abs(b.r)-Math.abs(a.r));
+    const pairStr = pairs.slice(0,3).map(p => `${SIGNAL_DEFS.find(d=>d.id===p.a)?.label||p.a} vs ${SIGNAL_DEFS.find(d=>d.id===p.b)?.label||p.b}: r=${p.r.toFixed(2)}`).join("; ");
+    const prompt = `Analyzing world signals for ${activeLocs.map(l=>LOCATIONS[l]?.label).join(", ")}, ${ALL_TIME_LABELS[t0]} to ${ALL_TIME_LABELS[Math.min(t1-1,N-1)]}.\n\nSignals:\n${summary}\n\nTop relationships: ${pairStr}\n\nRespond ONLY in this exact format:\n\nREADING: [3 sentences. Specific, poetic. What story do these signals tell together?]\n\nECHO: [One specific historical period with similar pattern. One sentence on the parallel. One sentence on key difference.]`;
     try {
-      const res     = await fetch(API_URL, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ model:"claude-haiku-4-5-20251001", max_tokens:1000, messages:[{role:"user",content:prompt}] }) });
+      const res     = await fetch(API_URL, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({model:"claude-haiku-4-5-20251001", max_tokens:1000, messages:[{role:"user",content:prompt}]})});
       const rawText = await res.text();
-      if (!res.ok) throw new Error("HTTP " + res.status + ": " + rawText.slice(0, 300));
-      let json; try { json = JSON.parse(rawText); } catch(pe) { throw new Error("Not JSON: " + rawText.slice(0, 300)); }
-      if (json.type === "error" || json.error) throw new Error(json.error?.message || JSON.stringify(json).slice(0, 200));
-      const txt = (Array.isArray(json.content) ? json.content : []).filter(b => b.type === "text").map(b => b.text).join("").trim();
-      if (!txt) throw new Error("No text. Keys: " + Object.keys(json).join(","));
-      const rM = txt.match(/READING:\s*([\s\S]*?)(?=ECHO:|$)/);
-      const eM = txt.match(/ECHO:\s*([\s\S]*?)$/);
-      setReading(rM ? rM[1].trim() : txt); setEcho(eM ? eM[1].trim() : ""); setStatus("done");
-    } catch(err) { setReading("Error: " + err.message); setStatus("error"); }
+      if (!res.ok) throw new Error("HTTP "+res.status+": "+rawText.slice(0,300));
+      let json; try { json = JSON.parse(rawText); } catch { throw new Error("Not JSON: "+rawText.slice(0,300)); }
+      if (json.type==="error"||json.error) throw new Error(json.error?.message||JSON.stringify(json).slice(0,200));
+      const txt = (Array.isArray(json.content)?json.content:[]).filter(b=>b.type==="text").map(b=>b.text).join("").trim();
+      if (!txt) throw new Error("No text. Keys: "+Object.keys(json).join(","));
+      const rM = txt.match(/READING:\s*([\s\S]*?)(?=ECHO:|$)/), eM = txt.match(/ECHO:\s*([\s\S]*?)$/);
+      setReading(rM?rM[1].trim():txt); setEcho(eM?eM[1].trim():""); setStatus("done");
+    } catch(err) { setReading("Error: "+err.message); setStatus("error"); }
     setLoading(false);
   };
 
-  const pad = isDesktop ? "24px" : "16px";
   return (
-    <div style={{display:"flex",flexDirection:"column",gap:12,padding:pad}}>
-      <div style={{fontSize:10,letterSpacing:"0.2em",color:V.textDim,fontFamily:SANS,fontWeight:600,textTransform:"uppercase",marginBottom:4}}>AI Interpretation</div>
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
       <button onClick={analyze} disabled={loading} style={{width:"100%",padding:"15px 0",background:loading?"transparent":V.gold,border:`2px solid ${V.gold}`,color:loading?V.gold:"#000",fontFamily:SANS,fontWeight:700,fontSize:12,letterSpacing:"0.15em",cursor:loading?"wait":"pointer",textTransform:"uppercase",transition:"background 150ms, color 150ms"}}>
         {loading ? "Scanning..." : "Read the Signals"}
       </button>
-      {status === "need2" && <p style={{margin:0,fontSize:12,color:V.red,fontFamily:MONO}}>Activate at least 2 signals.</p>}
-      {reading && status !== "error" && (
+      {status==="need2" && <p style={{margin:0,fontSize:12,color:V.red,fontFamily:MONO}}>Activate at least 2 signals first.</p>}
+      {status==="idle"  && <p style={{margin:0,fontSize:12,color:V.textFaint,fontFamily:MONO,lineHeight:1.7}}>Select 2+ signals and press Read for AI interpretation and historical echo.</p>}
+      {reading && status!=="error" && (
         <div style={{padding:16,border:`1px solid ${V.border}`,background:"rgba(255,255,255,0.03)"}}>
           <div style={{fontSize:9,letterSpacing:"0.2em",color:V.textDim,marginBottom:10,fontFamily:SANS,fontWeight:600,textTransform:"uppercase"}}>Signal Reading</div>
           <p style={{margin:0,fontSize:13,lineHeight:1.8,color:V.text,fontFamily:MONO}}>{reading}</p>
@@ -423,10 +366,14 @@ function ReadPanel({activeIds, locations, timeRange, perspective, customSignals,
           <p style={{margin:0,fontSize:13,lineHeight:1.8,color:"rgba(240,230,200,0.9)",fontFamily:MONO}}>{echo}</p>
         </div>
       )}
-      {status === "error" && <div style={{padding:12,borderLeft:`3px solid ${V.red}`}}><p style={{margin:0,fontSize:12,color:"#ff6688",fontFamily:MONO}}>{reading}</p></div>}
-      {status === "idle" && <p style={{margin:0,fontSize:12,color:V.textFaint,fontFamily:MONO,lineHeight:1.75}}>Select signals, location, and time window. Press Read for AI interpretation and historical echo.</p>}
+      {status==="error" && <div style={{padding:12,borderLeft:`3px solid ${V.red}`}}><p style={{margin:0,fontSize:12,color:"#ff6688",fontFamily:MONO}}>{reading}</p></div>}
     </div>
   );
+}
+
+// ── SECTION LABEL ─────────────────────────────────────────────────────────────
+function SectionLabel({children}) {
+  return <div style={{fontSize:10,letterSpacing:"0.18em",color:V.textDim,fontFamily:SANS,fontWeight:600,textTransform:"uppercase",marginBottom:12}}>{children}</div>;
 }
 
 // ── MAIN APP ──────────────────────────────────────────────────────────────────
@@ -441,362 +388,326 @@ export default function App() {
   const [customSignals, setCustomSignals] = useState([]);
   const [hoveredId,     setHoveredId]     = useState(null);
   const [pointIdx,      setPointIdx]      = useState(null);
-  const [tab,           setTab]           = useState("chart");
   const [showAdd,       setShowAdd]       = useState(false);
   const [canvasW,       setCanvasW]       = useState(340);
   const [canvasH,       setCanvasH]       = useState(240);
   const [windowWidth,   setWindowWidth]   = useState(window.innerWidth);
+  const [headerH,       setHeaderH]       = useState(82);
+  const headerRef = useRef(null);
   const isDesktop = windowWidth >= 768;
 
+  // Resize + header measurement
   useEffect(() => {
-    const update = () => {
+    const measure = () => {
       const w = window.innerWidth;
       setWindowWidth(w);
-      setCanvasW(w >= 768 ? Math.min(Math.max(300, w - 360 - 64), 1100) : w - 32);
+      setCanvasW(w >= 768 ? Math.min(Math.max(300, w - 380 - 64), 1100) : w - 32);
       setCanvasH(w >= 768 ? 400 : 260);
+      if (headerRef.current) setHeaderH(headerRef.current.offsetHeight);
     };
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
   }, []);
 
-  const toggleSignal   = id => setActiveIds(p => p.includes(id) ? p.filter(s => s !== id) : [...p, id]);
-  const toggleLocation = id => setLocations(p => p.map(l => l.id === id ? {...l, active:!l.active} : l));
-  const addCustom      = sig => { setCustomSignals(p => [...p, sig]); setActiveIds(p => [...p, sig.id]); };
-  const removeCustom   = id  => { setCustomSignals(p => p.filter(s => s.id !== id)); setActiveIds(p => p.filter(s => s !== id)); };
+  // Re-measure header after fonts load
+  useEffect(() => {
+    const t = setTimeout(() => { if (headerRef.current) setHeaderH(headerRef.current.offsetHeight); }, 500);
+    return () => clearTimeout(t);
+  }, []);
 
-  const locId      = (locations.find(l => l.active) || {id:"global"}).id;
-  const [t0, t1]   = timeRange;
-  const allDefs    = [...SIGNAL_DEFS, ...customSignals.map(c => ({...c, baseKey:null}))];
-  const cats       = ["All", ...new Set(allDefs.map(s => s.cat))];
-  const filtered   = allDefs.filter(d => {
+  const toggleSignal   = useCallback(id => setActiveIds(p => p.includes(id) ? p.filter(s=>s!==id) : [...p,id]), []);
+  const toggleLocation = useCallback(id => setLocations(p => p.map(l => l.id===id ? {...l,active:!l.active} : l)), []);
+  const addCustom      = useCallback(sig => { setCustomSignals(p=>[...p,sig]); setActiveIds(p=>[...p,sig.id]); }, []);
+  const removeCustom   = useCallback(id  => { setCustomSignals(p=>p.filter(s=>s.id!==id)); setActiveIds(p=>p.filter(s=>s!==id)); }, []);
+
+  const locId    = (locations.find(l=>l.active)||{id:"global"}).id;
+  const [t0,t1]  = timeRange;
+  const allDefs  = [...SIGNAL_DEFS, ...customSignals.map(c=>({...c,baseKey:null}))];
+  const cats     = ["All", ...new Set(allDefs.map(s=>s.cat))];
+  const filtered = allDefs.filter(d => {
     const matchQ   = !searchQ || d.label.toLowerCase().includes(searchQ.toLowerCase()) || d.cat.toLowerCase().includes(searchQ.toLowerCase());
-    const matchCat = catFilter === "All" || d.cat === catFilter;
+    const matchCat = catFilter==="All" || d.cat===catFilter;
     return matchQ && matchCat;
   });
-  const sorted = [...filtered].sort((a, b) => {
-    if (sortMode === "category") return a.cat.localeCompare(b.cat) || a.label.localeCompare(b.label);
-    if (sortMode === "harmony") {
-      const ra = activeIds.filter(id => id !== a.id).reduce((s, id) => { const da = a.custom ? a.data.slice(0, t1-t0) : getSignalData(a.id, locId).slice(t0, t1); const db = getSignalData(id, locId).slice(t0, t1); return s + Math.abs(pearson(da, db)); }, 0);
-      const rb = activeIds.filter(id => id !== b.id).reduce((s, id) => { const db2 = b.custom ? b.data.slice(0, t1-t0) : getSignalData(b.id, locId).slice(t0, t1); const db = getSignalData(id, locId).slice(t0, t1); return s + Math.abs(pearson(db2, db)); }, 0);
-      return rb - ra;
+  const sorted = [...filtered].sort((a,b) => {
+    if (sortMode==="category") return a.cat.localeCompare(b.cat) || a.label.localeCompare(b.label);
+    if (sortMode==="harmony") {
+      const scoreOf = def => activeIds.filter(id=>id!==def.id).reduce((s,id) => {
+        const da = def.custom ? def.data.slice(0,t1-t0) : getSignalData(def.id,locId).slice(t0,t1);
+        return s + Math.abs(pearson(da, getSignalData(id,locId).slice(t0,t1)));
+      }, 0);
+      return scoreOf(b) - scoreOf(a);
     }
     return a.label.localeCompare(b.label);
   });
 
   const harmony = (() => {
-    let total = 0, count = 0;
-    activeIds.forEach((a, ai) => activeIds.slice(ai+1).forEach(b => {
-      total += Math.abs(pearson(getSignalData(a, locId).slice(t0, t1), getSignalData(b, locId).slice(t0, t1)));
+    let total=0, count=0;
+    activeIds.forEach((a,ai) => activeIds.slice(ai+1).forEach(b => {
+      total += Math.abs(pearson(getSignalData(a,locId).slice(t0,t1), getSignalData(b,locId).slice(t0,t1)));
       count++;
     }));
-    return count ? total / count : 0;
+    return count ? total/count : 0;
   })();
-  const hC     = harmony > 0.6 ? V.lime : harmony > 0.35 ? V.gold : V.red;
+  const hC     = harmony > 0.6 ? V.lime  : harmony > 0.35 ? V.gold : V.red;
   const hLabel = harmony > 0.6 ? "In Harmony" : harmony > 0.35 ? "Mild Sync" : "Dissonant";
+  const activeLocs = locations.filter(l=>l.active);
 
-  const activeLocs = locations.filter(l => l.active);
-  const TABS = [
-    {id:"chart",     label:"Chart"},
-    {id:"latch",     label:"LATCH"},
-    {id:"harmonics", label:"Links"},
-    {id:"read",      label:"Read"},
-  ];
+  // Correlation pairs (sorted by |r|)
+  const corrPairs = (() => {
+    const pairs = [];
+    for (let i=0; i<activeIds.length; i++) for (let j=i+1; j<activeIds.length; j++) {
+      pairs.push({a:activeIds[i], b:activeIds[j], r:pearson(getSignalData(activeIds[i],locId).slice(t0,t1), getSignalData(activeIds[j],locId).slice(t0,t1))});
+    }
+    return pairs.sort((a,b) => Math.abs(b.r)-Math.abs(a.r));
+  })();
 
-  const SignalList = () => (
-    <div>
-      <div style={{fontSize:10,letterSpacing:"0.15em",color:V.textDim,fontFamily:SANS,fontWeight:600,textTransform:"uppercase",marginBottom:10}}>Signals ({filtered.length})</div>
-      {sorted.map(def => {
-        const active = activeIds.includes(def.id);
-        const col    = PALETTE[SIGNAL_DEFS.findIndex(d => d.id === def.id) % PALETTE.length] || def.color || PALETTE[0];
-        const d      = def.custom ? def.data : getSignalData(def.id, locId).slice(t0, t1);
-        const latest = d[d.length - 1];
-        const trend  = d.length > 1 ? d[d.length-1] - d[0] : 0;
-        return (
-          <div key={def.id} onClick={() => toggleSignal(def.id)}
-            style={{display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderBottom:`1px solid ${V.border}`,cursor:"pointer",opacity:active?1:0.35,transition:"opacity 150ms"}}>
-            <div style={{width:10,height:10,flexShrink:0,background:active?col:"rgba(240,237,232,0.15)"}}/>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:12,fontFamily:SANS,fontWeight:active?600:400,color:active?col:V.textFaint,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{def.label}</div>
-              <div style={{fontSize:10,color:V.textFaint,fontFamily:SANS}}>{def.cat}</div>
-            </div>
-            <div style={{textAlign:"right",flexShrink:0}}>
-              <div style={{fontSize:13,color:V.text,fontFamily:MONO}}>{latest?.toFixed(1)}<span style={{fontSize:10,color:V.textFaint}}>{def.unit}</span></div>
-              <div style={{fontSize:11,color:trend>0?V.lime:V.red,fontFamily:MONO}}>{trend>0?"▲":"▼"}</div>
-            </div>
-            {def.custom && <button onClick={e => {e.stopPropagation(); removeCustom(def.id);}} style={{background:"none",border:"none",color:"rgba(255,34,85,0.5)",cursor:"pointer",fontSize:16,padding:"0 2px"}}>×</button>}
-          </div>
-        );
-      })}
-      <button onClick={() => setShowAdd(true)} style={{width:"100%",padding:"12px 0",marginTop:12,background:"transparent",border:`1px dashed rgba(212,168,67,0.4)`,color:V.gold,fontFamily:SANS,fontWeight:600,fontSize:11,letterSpacing:"0.1em",cursor:"pointer",textTransform:"uppercase"}}>
-        + Add Your Own Signal
-      </button>
-    </div>
-  );
-
-  const hPad = isDesktop ? "14px 32px 0" : "12px 16px 0";
+  const hPad = isDesktop ? "16px 32px 0" : "12px 16px 0";
+  const lPad = isDesktop ? "20px 28px" : "16px";
+  const rPad = isDesktop ? "20px 20px" : "16px";
+  const divider = <div style={{borderTop:`1px solid ${V.border}`,margin:"20px 0"}}/>;
 
   return (
-    <div style={{minHeight:"100dvh",background:V.bg,color:V.text,fontFamily:SANS,maxWidth:isDesktop?"none":540,margin:"0 auto",overflow:"hidden"}}>
+    <div style={{minHeight:"100dvh",background:V.bg,color:V.text,fontFamily:SANS,maxWidth:isDesktop?"none":540,margin:"0 auto"}}>
 
       {/* ── STICKY HEADER ── */}
-      <div style={{padding:hPad,borderBottom:`2px solid ${V.gold}`,background:V.bgPanel,position:"sticky",top:0,zIndex:100}}>
-
-        {/* Title + Harmony */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
-          <div>
+      <header ref={headerRef} style={{padding:hPad,borderBottom:`2px solid ${V.gold}`,background:"#0f2035",position:"sticky",top:0,zIndex:100}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16}}>
+          <div style={{flex:1,minWidth:0}}>
             <div style={{fontFamily:DISPLAY,fontSize:isDesktop?26:20,fontWeight:900,letterSpacing:"0.05em",color:V.text,lineHeight:1.1}}>
               SIGNAL HARMONICS
             </div>
-            <p style={{margin:"5px 0 0",fontSize:12,color:V.textDim,fontFamily:SANS,lineHeight:1.55,maxWidth:isDesktop?520:320}}>
+            <p style={{margin:"5px 0 10px",fontSize:12,color:V.textDim,fontFamily:SANS,lineHeight:1.55,maxWidth:560}}>
               A cross-domain correlation instrument. Select signals across economy, markets, society, environment, and crime — then read the patterns they form together.
             </p>
           </div>
-          <div style={{textAlign:"right",flexShrink:0,paddingLeft:16,paddingTop:2}}>
+          <div style={{textAlign:"right",flexShrink:0,paddingTop:2}}>
             <div style={{fontSize:9,color:V.textDim,fontFamily:SANS,fontWeight:500,textTransform:"uppercase",letterSpacing:"0.15em"}}>Harmony</div>
             <div style={{fontSize:isDesktop?30:24,fontFamily:DISPLAY,fontWeight:900,color:hC,lineHeight:1}}>{Math.round(harmony*100)}%</div>
             <div style={{fontSize:10,color:hC,fontFamily:SANS,fontWeight:500,textTransform:"uppercase",letterSpacing:"0.1em"}}>{hLabel}</div>
           </div>
         </div>
+      </header>
 
-        {/* Tab bar */}
-        <div style={{display:"flex",gap:1,marginTop:8}}>
-          {TABS.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)} style={{flex:1,padding:isDesktop?"11px 0":"9px 0",fontSize:isDesktop?11:10,letterSpacing:"0.12em",background:tab===t.id?V.gold:"transparent",border:"none",color:tab===t.id?"#000000":V.textDim,cursor:"pointer",fontFamily:SANS,fontWeight:tab===t.id?700:400,textTransform:"uppercase",transition:"background 150ms, color 150ms"}}>
-              {t.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* ── PAGE BODY: left content + right signal panel ── */}
+      <div style={{
+        display: isDesktop ? "grid" : "block",
+        gridTemplateColumns: isDesktop ? "1fr 380px" : undefined,
+        alignItems: "start",
+      }}>
 
-      {/* ── CHART TAB ── */}
-      {tab === "chart" && (
-        <div style={{display:isDesktop?"grid":"flex",gridTemplateColumns:isDesktop?"1fr 360px":undefined,flexDirection:isDesktop?undefined:"column",height:isDesktop?"calc(100dvh - 130px)":undefined}}>
+        {/* ── LEFT: chart + controls + analysis ── */}
+        <div style={{padding:lPad, borderRight:isDesktop?`1px solid ${V.border}`:"none"}}>
 
-          {/* Chart column */}
-          <div style={{display:"flex",flexDirection:"column",padding:isDesktop?"20px 24px":"12px 16px 0",overflowY:isDesktop?"auto":"visible",borderRight:isDesktop?`1px solid ${V.border}`:"none"}}>
-
-            {/* Location + perspective row */}
-            <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:6,marginBottom:10}}>
-              {Object.entries(LOCATIONS).map(([id, loc]) => {
-                const active = locations.find(l => l.id === id)?.active;
+          {/* Location + perspective row */}
+          <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:6,marginBottom:12}}>
+            <div style={{display:"flex",flexWrap:"wrap",gap:5,flex:1}}>
+              {Object.entries(LOCATIONS).map(([id,loc]) => {
+                const active = locations.find(l=>l.id===id)?.active;
                 return (
-                  <button key={id} onClick={() => toggleLocation(id)} style={{padding:"5px 10px",fontSize:11,background:active?hexToRgba(loc.color,0.15):"rgba(255,255,255,0.04)",border:`1px solid ${active?loc.color:V.border}`,color:active?loc.color:V.textDim,cursor:"pointer",fontFamily:SANS,fontWeight:active?600:400,transition:"background 150ms"}}>
-                    {loc.flag} {loc.label}
-                  </button>
-                );
-              })}
-              <div style={{marginLeft:"auto",display:"flex",gap:4}}>
-                {[["signals","Signals"],["overlay","Regions"]].map(([id, lbl]) => (
-                  <button key={id} onClick={() => setPerspective(id)} style={{padding:"5px 10px",fontSize:11,background:perspective===id?V.violet:"transparent",border:`1px solid ${perspective===id?V.violet:V.border}`,color:perspective===id?"#fff":V.textDim,cursor:"pointer",fontFamily:SANS,fontWeight:perspective===id?600:400}}>
-                    {lbl}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <LineChart
-              activeIds={activeIds}
-              locations={locations}
-              hoveredId={hoveredId}
-              onHover={setHoveredId}
-              onPointSelect={setPointIdx}
-              pointIdx={pointIdx}
-              width={canvasW}
-              height={canvasH}
-              timeRange={timeRange}
-              perspective={perspective}
-              customSignals={customSignals}
-            />
-
-            {/* Time controls */}
-            <div style={{width:"100%",padding:"12px 0 6px"}}>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:V.textDim,fontFamily:SANS,fontWeight:500,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:6}}>
-                <span>Time Window</span>
-                <span style={{color:V.gold,fontFamily:MONO}}>{ALL_TIME_LABELS[t0]} → {ALL_TIME_LABELS[Math.min(t1-1, N-1)]}</span>
-              </div>
-              <div style={{display:"flex",gap:4,marginBottom:8}}>
-                <input type="range" min={0} max={N-12} value={t0} onChange={e => setTimeRange([+e.target.value, Math.min(+e.target.value+12, N)])} style={{flex:1,accentColor:V.violet,height:3}}/>
-                <input type="range" min={12} max={N} value={t1} onChange={e => setTimeRange([Math.max(0, +e.target.value-12), +e.target.value])} style={{flex:1,accentColor:V.gold,height:3}}/>
-              </div>
-              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                <button onClick={() => setTimeRange([0, N])} style={{padding:"4px 10px",fontSize:10,background:"rgba(255,255,255,0.05)",border:`1px solid ${V.border}`,color:V.textDim,cursor:"pointer",fontFamily:SANS,fontWeight:500}}>All</button>
-                {ERAS.map(e => (
-                  <button key={e.label} onClick={() => setTimeRange([e.start, e.end+1])} style={{padding:"4px 10px",fontSize:10,background:e.color,border:`1px solid rgba(255,255,255,0.12)`,color:"rgba(255,255,255,0.85)",cursor:"pointer",fontFamily:SANS,fontWeight:500}}>{e.label}</button>
-                ))}
-              </div>
-            </div>
-
-            {/* Hover data table */}
-            {pointIdx !== null && (
-              <div style={{width:"100%",marginTop:8,padding:"12px 14px",border:`1px solid ${V.border}`,background:V.bgPanel}}>
-                <div style={{fontSize:10,color:V.gold,fontFamily:SANS,fontWeight:600,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.1em"}}>
-                  {ALL_TIME_LABELS[t0+pointIdx] || `PT ${pointIdx+1}`} · {activeLocs.map(l => LOCATIONS[l.id]?.label).join(" / ")}
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
-                  {activeIds.slice(0,6).map((id, si) => {
-                    const def    = SIGNAL_DEFS.find(d => d.id === id);
-                    const custom = customSignals.find(c => c.id === id);
-                    const d      = custom ? custom.data : getSignalData(id, locId);
-                    const v      = d[t0 + Math.min(pointIdx, d.length-1)];
-                    const col    = PALETTE[si % PALETTE.length];
-                    return (
-                      <div key={id} style={{textAlign:"center"}}>
-                        <div style={{fontSize:10,color:col,fontFamily:SANS,fontWeight:600,marginBottom:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{def?.label||custom?.label||id}</div>
-                        <div style={{fontSize:14,color:V.text,fontFamily:MONO}}>{v?.toFixed(1)}<span style={{fontSize:10,color:V.textFaint}}>{def?.unit||custom?.unit||""}</span></div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Legend */}
-            <div style={{display:"flex",flexWrap:"wrap",gap:10,justifyContent:"flex-start",padding:"10px 0 16px"}}>
-              {perspective === "overlay"
-                ? activeLocs.map(l => (
-                    <div key={l.id} style={{display:"flex",alignItems:"center",gap:6}}>
-                      <div style={{width:16,height:3,background:LOCATIONS[l.id].color}}/>
-                      <span style={{fontSize:11,color:LOCATIONS[l.id].color,fontFamily:SANS,fontWeight:500}}>{LOCATIONS[l.id].flag} {LOCATIONS[l.id].label}</span>
-                    </div>
-                  ))
-                : activeIds.map((id, si) => {
-                    const def    = SIGNAL_DEFS.find(d => d.id === id);
-                    const custom = customSignals.find(c => c.id === id);
-                    const col    = PALETTE[si % PALETTE.length];
-                    return (
-                      <div key={id} style={{display:"flex",alignItems:"center",gap:6}}>
-                        <div style={{width:16,height:3,background:col}}/>
-                        <span style={{fontSize:11,color:col,fontFamily:SANS,fontWeight:500}}>{def?.label||custom?.label||id}</span>
-                      </div>
-                    );
-                  })
-              }
-            </div>
-          </div>
-
-          {/* Right sidebar — signal list */}
-          <div style={{padding:isDesktop?"20px":"16px",overflowY:"auto",borderTop:isDesktop?"none":`1px solid ${V.border}`}}>
-            <SignalList/>
-          </div>
-        </div>
-      )}
-
-      {/* ── LATCH TAB ── */}
-      {tab === "latch" && (
-        <div style={{padding:isDesktop?"24px 32px":"16px",display:"flex",flexDirection:"column",gap:20,maxWidth:isDesktop?900:"none",margin:"0 auto"}}>
-
-          <div>
-            <div style={{fontSize:10,letterSpacing:"0.15em",color:V.gold,fontFamily:SANS,fontWeight:700,textTransform:"uppercase",marginBottom:10}}>L — Location</div>
-            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-              {Object.entries(LOCATIONS).map(([id, loc]) => {
-                const active = locations.find(l => l.id === id)?.active;
-                return (
-                  <button key={id} onClick={() => toggleLocation(id)} style={{padding:"8px 14px",fontSize:12,background:active?hexToRgba(loc.color,0.15):"rgba(255,255,255,0.04)",border:`1px solid ${active?loc.color:V.border}`,color:active?loc.color:V.textDim,cursor:"pointer",fontFamily:SANS,fontWeight:active?600:400,transition:"background 150ms"}}>
+                  <button key={id} onClick={()=>toggleLocation(id)} style={{padding:"5px 10px",fontSize:11,background:active?hexToRgba(loc.color,0.15):"rgba(255,255,255,0.04)",border:`1px solid ${active?loc.color:V.border}`,color:active?loc.color:V.textDim,cursor:"pointer",fontFamily:SANS,fontWeight:active?600:400,transition:"background 150ms"}}>
                     {loc.flag} {loc.label}
                   </button>
                 );
               })}
             </div>
-            <div style={{fontSize:12,color:V.textFaint,fontFamily:MONO,marginTop:8,lineHeight:1.6}}>
-              Switch to Chart → Regions to see signals diverge across geographies.
-            </div>
-          </div>
-
-          <div>
-            <div style={{fontSize:10,letterSpacing:"0.15em",color:V.gold,fontFamily:SANS,fontWeight:700,textTransform:"uppercase",marginBottom:10}}>A — Alphabet Search</div>
-            <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search signals by name or category..."
-              style={{width:"100%",background:"rgba(255,255,255,0.05)",border:`1px solid ${V.border}`,color:V.text,padding:"10px 14px",fontFamily:MONO,fontSize:13,boxSizing:"border-box",outline:"none"}}/>
-          </div>
-
-          <div>
-            <div style={{fontSize:10,letterSpacing:"0.15em",color:V.gold,fontFamily:SANS,fontWeight:700,textTransform:"uppercase",marginBottom:10}}>T — Time Eras</div>
-            <div style={{display:"grid",gridTemplateColumns:isDesktop?"repeat(4,1fr)":"1fr 1fr",gap:6}}>
-              <button onClick={() => setTimeRange([0, N])} style={{padding:"10px",fontSize:11,background:"rgba(255,255,255,0.05)",border:`1px solid ${V.border}`,color:V.textDim,cursor:"pointer",fontFamily:SANS,fontWeight:500,textAlign:"left"}}>
-                All 2019–2024
-              </button>
-              {ERAS.map(e => (
-                <button key={e.label} onClick={() => setTimeRange([e.start, e.end+1])} style={{padding:"10px",fontSize:11,background:e.color,border:`1px solid rgba(255,255,255,0.15)`,color:"rgba(255,255,255,0.9)",cursor:"pointer",fontFamily:SANS,fontWeight:500,textAlign:"left"}}>
-                  <div style={{fontWeight:600}}>{e.label}</div>
-                  <div style={{opacity:0.65,marginTop:2,fontSize:10,fontFamily:MONO}}>{ALL_TIME_LABELS[e.start].slice(-4)} – {ALL_TIME_LABELS[e.end].slice(-4)}</div>
+            <div style={{display:"flex",gap:4,flexShrink:0}}>
+              {[["signals","Signals"],["overlay","Regions"]].map(([id,lbl]) => (
+                <button key={id} onClick={()=>setPerspective(id)} style={{padding:"5px 10px",fontSize:11,background:perspective===id?V.violet:"transparent",border:`1px solid ${perspective===id?V.violet:V.border}`,color:perspective===id?"#fff":V.textDim,cursor:"pointer",fontFamily:SANS,fontWeight:perspective===id?600:400}}>
+                  {lbl}
                 </button>
               ))}
             </div>
           </div>
 
-          <div>
-            <div style={{fontSize:10,letterSpacing:"0.15em",color:V.gold,fontFamily:SANS,fontWeight:700,textTransform:"uppercase",marginBottom:10}}>C — Category</div>
-            <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-              {cats.map(c => (
-                <button key={c} onClick={() => setCatFilter(c)} style={{padding:"6px 12px",fontSize:11,background:catFilter===c?V.gold:"rgba(255,255,255,0.04)",border:`1px solid ${catFilter===c?V.gold:V.border}`,color:catFilter===c?"#000":V.textDim,cursor:"pointer",fontFamily:SANS,fontWeight:catFilter===c?700:400,transition:"background 150ms"}}>{c}</button>
+          {/* Chart */}
+          <LineChart
+            activeIds={activeIds} locations={locations} customSignals={customSignals}
+            hoveredId={hoveredId} onHover={setHoveredId}
+            onPointSelect={setPointIdx} pointIdx={pointIdx}
+            width={canvasW} height={canvasH}
+            timeRange={timeRange} perspective={perspective}
+          />
+
+          {/* Time controls */}
+          <div style={{marginTop:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:V.textDim,fontFamily:SANS,fontWeight:500,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:6}}>
+              <span>Time Window</span>
+              <span style={{color:V.gold,fontFamily:MONO}}>{ALL_TIME_LABELS[t0]} → {ALL_TIME_LABELS[Math.min(t1-1,N-1)]}</span>
+            </div>
+            <div style={{display:"flex",gap:4,marginBottom:8}}>
+              <input type="range" min={0} max={N-12} value={t0} onChange={e=>setTimeRange([+e.target.value, Math.min(+e.target.value+12,N)])} style={{flex:1,accentColor:V.violet,height:3}}/>
+              <input type="range" min={12} max={N} value={t1} onChange={e=>setTimeRange([Math.max(0,+e.target.value-12),+e.target.value])} style={{flex:1,accentColor:V.gold,height:3}}/>
+            </div>
+            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+              <button onClick={()=>setTimeRange([0,N])} style={{padding:"4px 10px",fontSize:10,background:"rgba(255,255,255,0.05)",border:`1px solid ${V.border}`,color:V.textDim,cursor:"pointer",fontFamily:SANS}}>All</button>
+              {ERAS.map(e => (
+                <button key={e.label} onClick={()=>setTimeRange([e.start,e.end+1])} style={{padding:"4px 10px",fontSize:10,background:e.color,border:`1px solid rgba(255,255,255,0.12)`,color:"rgba(255,255,255,0.85)",cursor:"pointer",fontFamily:SANS}}>{e.label}</button>
               ))}
             </div>
           </div>
 
-          <div>
-            <div style={{fontSize:10,letterSpacing:"0.15em",color:V.gold,fontFamily:SANS,fontWeight:700,textTransform:"uppercase",marginBottom:10}}>H — Hierarchy Sort</div>
-            <div style={{display:"flex",gap:5}}>
-              {[["category","By Category"],["harmony","By Harmony"],["alpha","Alphabetical"]].map(([id, lbl]) => (
-                <button key={id} onClick={() => setSortMode(id)} style={{flex:1,padding:"8px 6px",fontSize:11,background:sortMode===id?V.violet:"rgba(255,255,255,0.04)",border:`1px solid ${sortMode===id?V.violet:V.border}`,color:sortMode===id?"#fff":V.textDim,cursor:"pointer",fontFamily:SANS,fontWeight:sortMode===id?600:400,transition:"background 150ms"}}>{lbl}</button>
-              ))}
-            </div>
-          </div>
-
-          <SignalList/>
-        </div>
-      )}
-
-      {/* ── LINKS TAB ── */}
-      {tab === "harmonics" && (
-        <div style={{padding:isDesktop?"24px 32px":"16px",maxWidth:isDesktop?900:"none",margin:"0 auto"}}>
-          <div style={{fontSize:10,letterSpacing:"0.15em",color:V.textDim,fontFamily:SANS,fontWeight:600,textTransform:"uppercase",marginBottom:16}}>Signal Relationships</div>
-          {(() => {
-            const pairs = [];
-            for (let i = 0; i < activeIds.length; i++) for (let j = i+1; j < activeIds.length; j++) {
-              const da = getSignalData(activeIds[i], locId).slice(t0, t1);
-              const db = getSignalData(activeIds[j], locId).slice(t0, t1);
-              pairs.push({ a:activeIds[i], b:activeIds[j], r:pearson(da, db) });
-            }
-            pairs.sort((a, b) => Math.abs(b.r) - Math.abs(a.r));
-            return pairs.map(({a, b, r}) => {
-              const la = SIGNAL_DEFS.find(d => d.id === a)?.label || a;
-              const lb = SIGNAL_DEFS.find(d => d.id === b)?.label || b;
-              const ca = PALETTE[SIGNAL_DEFS.findIndex(d => d.id === a) % PALETTE.length];
-              const cb = PALETTE[SIGNAL_DEFS.findIndex(d => d.id === b) % PALETTE.length];
-              const hue   = r > 0 ? V.lime : V.red;
-              const label = Math.abs(r) > 0.7 ? "Strong" : Math.abs(r) > 0.4 ? "Moderate" : "Weak";
-              return (
-                <div key={a+b} style={{marginBottom:14,paddingBottom:14,borderBottom:`1px solid ${V.border}`}}>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-                    <span style={{fontSize:12,fontFamily:SANS,color:V.textDim}}>
-                      <span style={{color:ca,fontWeight:600}}>{la}</span>
-                      <span style={{color:V.textFaint}}> × </span>
-                      <span style={{color:cb,fontWeight:600}}>{lb}</span>
-                    </span>
-                    <span style={{fontSize:13,fontFamily:MONO,color:hue,minWidth:44,textAlign:"right"}}>{r>0?"+":""}{r.toFixed(2)}</span>
-                  </div>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <div style={{flex:1,height:3,background:"rgba(255,255,255,0.08)"}}>
-                      <div style={{height:"100%",width:`${Math.abs(r)*100}%`,background:hue}}/>
+          {/* Hover data table */}
+          {pointIdx !== null && (
+            <div style={{marginTop:12,padding:"12px 14px",border:`1px solid ${V.border}`,background:"#0f2035"}}>
+              <div style={{fontSize:10,color:V.gold,fontFamily:SANS,fontWeight:600,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.1em"}}>
+                {ALL_TIME_LABELS[t0+pointIdx]||`Point ${pointIdx+1}`} · {activeLocs.map(l=>LOCATIONS[l.id]?.label).join(" / ")}
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                {activeIds.slice(0,6).map((id,si) => {
+                  const def    = SIGNAL_DEFS.find(d=>d.id===id);
+                  const custom = customSignals.find(c=>c.id===id);
+                  const d      = custom ? custom.data : getSignalData(id,locId);
+                  return (
+                    <div key={id} style={{textAlign:"center"}}>
+                      <div style={{fontSize:10,color:PALETTE[si%PALETTE.length],fontFamily:SANS,fontWeight:600,marginBottom:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{def?.label||custom?.label||id}</div>
+                      <div style={{fontSize:14,color:V.text,fontFamily:MONO}}>{d[t0+Math.min(pointIdx,d.length-1)]?.toFixed(1)}<span style={{fontSize:10,color:V.textFaint}}>{def?.unit||custom?.unit||""}</span></div>
                     </div>
-                    <span style={{fontSize:10,color:hue,minWidth:80,fontFamily:SANS,fontWeight:600,textTransform:"uppercase"}}>{label} {r>0?"Sync":"Invert"}</span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Legend */}
+          <div style={{display:"flex",flexWrap:"wrap",gap:10,padding:"12px 0 4px"}}>
+            {perspective==="overlay"
+              ? activeLocs.map(l => (
+                  <div key={l.id} style={{display:"flex",alignItems:"center",gap:6}}>
+                    <div style={{width:16,height:3,background:LOCATIONS[l.id].color}}/>
+                    <span style={{fontSize:11,color:LOCATIONS[l.id].color,fontFamily:SANS,fontWeight:500}}>{LOCATIONS[l.id].flag} {LOCATIONS[l.id].label}</span>
                   </div>
+                ))
+              : activeIds.map((id,si) => {
+                  const def    = SIGNAL_DEFS.find(d=>d.id===id);
+                  const custom = customSignals.find(c=>c.id===id);
+                  const col    = PALETTE[si%PALETTE.length];
+                  return (
+                    <div key={id} style={{display:"flex",alignItems:"center",gap:6}}>
+                      <div style={{width:16,height:3,background:col}}/>
+                      <span style={{fontSize:11,color:col,fontFamily:SANS,fontWeight:500}}>{def?.label||custom?.label||id}</span>
+                    </div>
+                  );
+                })
+            }
+          </div>
+
+          {divider}
+
+          {/* ── CORRELATIONS ── */}
+          <SectionLabel>Signal Relationships</SectionLabel>
+          {corrPairs.length === 0
+            ? <p style={{fontSize:13,color:V.textFaint,fontFamily:MONO,margin:0}}>Activate 2+ signals to see correlations.</p>
+            : corrPairs.map(({a,b,r}) => {
+                const la  = SIGNAL_DEFS.find(d=>d.id===a)?.label||a;
+                const lb  = SIGNAL_DEFS.find(d=>d.id===b)?.label||b;
+                const ca  = PALETTE[SIGNAL_DEFS.findIndex(d=>d.id===a)%PALETTE.length];
+                const cb  = PALETTE[SIGNAL_DEFS.findIndex(d=>d.id===b)%PALETTE.length];
+                const hue = r>0 ? V.lime : V.red;
+                const str = Math.abs(r)>0.7?"Strong":Math.abs(r)>0.4?"Moderate":"Weak";
+                return (
+                  <div key={a+b} style={{marginBottom:14,paddingBottom:14,borderBottom:`1px solid ${V.border}`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                      <span style={{fontSize:12,fontFamily:SANS,color:V.textDim}}>
+                        <span style={{color:ca,fontWeight:600}}>{la}</span>
+                        <span style={{color:V.textFaint}}> × </span>
+                        <span style={{color:cb,fontWeight:600}}>{lb}</span>
+                      </span>
+                      <span style={{fontSize:13,fontFamily:MONO,color:hue,minWidth:44,textAlign:"right"}}>{r>0?"+":""}{r.toFixed(2)}</span>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{flex:1,height:3,background:"rgba(255,255,255,0.08)"}}>
+                        <div style={{height:"100%",width:`${Math.abs(r)*100}%`,background:hue}}/>
+                      </div>
+                      <span style={{fontSize:10,color:hue,minWidth:80,fontFamily:SANS,fontWeight:600,textTransform:"uppercase"}}>{str} {r>0?"Sync":"Invert"}</span>
+                    </div>
+                  </div>
+                );
+              })
+          }
+
+          {divider}
+
+          {/* ── READ THE SIGNALS ── */}
+          <SectionLabel>AI Interpretation</SectionLabel>
+          <ReadPanel activeIds={activeIds} locations={locations} timeRange={timeRange} customSignals={customSignals}/>
+
+          <div style={{height:32}}/>
+        </div>
+
+        {/* ── RIGHT: signal panel (sticky on desktop) ── */}
+        <div style={{
+          gridColumn: isDesktop ? "2" : undefined,
+          gridRow:    isDesktop ? "1" : undefined,
+        }}>
+          <div style={{
+            position:  isDesktop ? "sticky" : "static",
+            top:       isDesktop ? headerH  : undefined,
+            maxHeight: isDesktop ? `calc(100dvh - ${headerH}px)` : undefined,
+            overflowY: isDesktop ? "auto"   : undefined,
+            padding:   rPad,
+            borderTop: isDesktop ? "none"   : `1px solid ${V.border}`,
+          }}>
+
+            <SectionLabel>Signals ({filtered.length})</SectionLabel>
+
+            {/* Search */}
+            <input
+              value={searchQ} onChange={e=>setSearchQ(e.target.value)}
+              placeholder="Search by name or category..."
+              style={{width:"100%",background:"rgba(255,255,255,0.05)",border:`1px solid ${V.border}`,color:V.text,padding:"9px 12px",fontFamily:MONO,fontSize:12,boxSizing:"border-box",outline:"none",marginBottom:10}}
+            />
+
+            {/* Category filter */}
+            <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:10}}>
+              {cats.map(c => (
+                <button key={c} onClick={()=>setCatFilter(c)} style={{padding:"4px 10px",fontSize:10,background:catFilter===c?V.gold:"rgba(255,255,255,0.04)",border:`1px solid ${catFilter===c?V.gold:V.border}`,color:catFilter===c?"#000":V.textDim,cursor:"pointer",fontFamily:SANS,fontWeight:catFilter===c?700:400,transition:"background 150ms"}}>{c}</button>
+              ))}
+            </div>
+
+            {/* Sort */}
+            <div style={{display:"flex",gap:4,marginBottom:14}}>
+              {[["category","Category"],["harmony","Harmony"],["alpha","A–Z"]].map(([id,lbl]) => (
+                <button key={id} onClick={()=>setSortMode(id)} style={{flex:1,padding:"6px 4px",fontSize:10,background:sortMode===id?V.violet:"rgba(255,255,255,0.04)",border:`1px solid ${sortMode===id?V.violet:V.border}`,color:sortMode===id?"#fff":V.textDim,cursor:"pointer",fontFamily:SANS,fontWeight:sortMode===id?600:400,transition:"background 150ms"}}>{lbl}</button>
+              ))}
+            </div>
+
+            {/* Signal list */}
+            {sorted.map(def => {
+              const active = activeIds.includes(def.id);
+              const col    = PALETTE[SIGNAL_DEFS.findIndex(d=>d.id===def.id)%PALETTE.length] || def.color || PALETTE[0];
+              const d      = def.custom ? def.data : getSignalData(def.id,locId).slice(t0,t1);
+              const latest = d[d.length-1];
+              const trend  = d.length>1 ? d[d.length-1]-d[0] : 0;
+              return (
+                <div key={def.id} onClick={()=>toggleSignal(def.id)}
+                  style={{display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderBottom:`1px solid ${V.border}`,cursor:"pointer",opacity:active?1:0.35,transition:"opacity 150ms"}}>
+                  <div style={{width:10,height:10,flexShrink:0,background:active?col:"rgba(240,237,232,0.15)"}}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontFamily:SANS,fontWeight:active?600:400,color:active?col:V.textFaint,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{def.label}</div>
+                    <div style={{fontSize:10,color:V.textFaint,fontFamily:SANS}}>{def.cat}</div>
+                  </div>
+                  <div style={{textAlign:"right",flexShrink:0}}>
+                    <div style={{fontSize:13,color:V.text,fontFamily:MONO}}>{latest?.toFixed(1)}<span style={{fontSize:10,color:V.textFaint}}>{def.unit}</span></div>
+                    <div style={{fontSize:11,color:trend>0?V.lime:V.red,fontFamily:MONO}}>{trend>0?"▲":"▼"}</div>
+                  </div>
+                  {def.custom && <button onClick={e=>{e.stopPropagation();removeCustom(def.id);}} style={{background:"none",border:"none",color:"rgba(255,34,85,0.5)",cursor:"pointer",fontSize:16,padding:"0 2px"}}>×</button>}
                 </div>
               );
-            });
-          })()}
-          {activeIds.length < 2 && <div style={{fontSize:13,color:V.textFaint,fontFamily:MONO}}>Activate 2+ signals to see relationships.</div>}
-        </div>
-      )}
+            })}
 
-      {/* ── READ TAB ── */}
-      {tab === "read" && (
-        <div style={{maxWidth:isDesktop?700:"none",margin:"0 auto"}}>
-          <ReadPanel activeIds={activeIds} locations={locations} timeRange={timeRange} perspective={perspective} customSignals={customSignals} isDesktop={isDesktop}/>
-        </div>
-      )}
+            <button onClick={()=>setShowAdd(true)} style={{width:"100%",padding:"12px 0",marginTop:12,background:"transparent",border:`1px dashed rgba(212,168,67,0.4)`,color:V.gold,fontFamily:SANS,fontWeight:600,fontSize:11,letterSpacing:"0.1em",cursor:"pointer",textTransform:"uppercase"}}>
+              + Add Your Own Signal
+            </button>
 
-      {showAdd && <AddModal onAdd={addCustom} onClose={() => setShowAdd(false)} usedColors={Object.values(LOCATIONS).map(l => l.color)}/>}
+            <div style={{height:20}}/>
+          </div>
+        </div>
+
+      </div>
+
+      {showAdd && <AddModal onAdd={addCustom} onClose={()=>setShowAdd(false)} usedColors={Object.values(LOCATIONS).map(l=>l.color)}/>}
     </div>
   );
 }
