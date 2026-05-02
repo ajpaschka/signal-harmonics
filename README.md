@@ -10,9 +10,9 @@ Live at [signalharmonics.paschkastudio.com](https://signalharmonics.paschkastudi
 
 ## What It Does
 
-Signal Harmonics treats global data domains as oscilloscope channels. When two channels are active, it calculates their Pearson correlation coefficient and renders the relationship as a radial waveform. The center orb reflects the overall harmony score across all active signals. The **READ THE SIGNALS** trigger sends the current signal state to Claude for AI interpretation and historical pattern matching.
+Signal Harmonics reads Pearson correlations across 16 signals in 6 regions over 72 months (2019–2024). Select signals, set a time window, and the chart shows how they move together. The harmony score reflects how synchronized your active signals are. **Read the Signals** sends the current state to Claude for AI interpretation and historical pattern matching.
 
-The interface is organized by [LATCH](https://www.wurman.com/) — Richard Saul Wurman's five axes of information architecture:
+The interface uses [LATCH](https://www.wurman.com/) — Richard Saul Wurman's five axes of information architecture:
 
 | Axis | Control |
 |------|---------|
@@ -46,6 +46,22 @@ Current version uses a curated static dataset: 16 signals × 6 regions × 72 mon
 | Environment | Temp Anomaly | Open-Meteo |
 | Digital | Internet Index, Cybercrime | Cloudflare Radar |
 | Crime | Violent, Property, Drug, Homicide | FBI UCR |
+
+---
+
+## Fork It — Build On It
+
+Signal Harmonics is open source under MIT. The core is intentionally minimal — a clean substrate for extension.
+
+Good branches to build:
+
+- **Live data** — swap the static dataset for real API feeds (FRED, Finnhub, Open-Meteo are all documented in the data table below)
+- **New signal categories** — add politics, health, housing, culture
+- **Different visualization** — the canvas layer is self-contained and swappable
+- **Export / sharing** — snapshot the current signal state and share a link
+- **Your own domain** — full deploy instructions below
+
+Fork the repo on GitHub, build what you want, and open a PR if you want it merged back. No permission needed to fork. Issues and feature requests welcome.
 
 ---
 
